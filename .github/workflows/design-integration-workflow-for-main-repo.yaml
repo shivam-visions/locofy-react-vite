@@ -413,9 +413,23 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      - name: Check Slack Configuration
+        id: check_slack
+        run: |
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "Slack notifications not configured (SLACK_WEBHOOK_URL secret missing)"
+          fi
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          
       - name: Send Slack Notification
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        if: steps.check_slack.outputs.configured == 'true'
         continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           STATUS="${{ needs.integrate.result }}"
           if [ "$STATUS" == "success" ]; then
@@ -428,7 +442,7 @@ jobs:
             MESSAGE="Design integration failed or needs attention"
           fi
           
-          curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          curl -X POST $SLACK_WEBHOOK_URL \
             -H 'Content-type: application/json' \
             -d "{
               \"attachments\": [
@@ -467,8 +481,21 @@ jobs:
               ]
             }"
             
+      - name: Check Email Configuration
+        id: check_email
+        run: |
+          if [ -n "$SMTP_SERVER" ] && [ -n "$NOTIFICATION_EMAIL" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "Email notifications not configured (SMTP_SERVER or NOTIFICATION_EMAIL secret missing)"
+          fi
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
+          
       - name: Send Email Notification
-        if: ${{ secrets.SMTP_SERVER != '' && secrets.NOTIFICATION_EMAIL != '' }}
+        if: steps.check_email.outputs.configured == 'true'
         continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
