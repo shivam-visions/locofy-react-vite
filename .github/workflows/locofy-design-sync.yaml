@@ -142,7 +142,7 @@ jobs:
               "locofy_repo": "${{ github.repository }}",
               "locofy_branch": "${{ github.ref_name }}",
               "locofy_sha": "${{ github.sha }}",
-              "locofy_commit_message": "${{ steps.prepare.outputs.commit_message }}",
+              "locofy_commit_message": ${{ toJson(steps.prepare.outputs.commit_message) }},
               "target_branch": "${{ env.MAIN_REPO_BRANCH }}",
               "triggered_by": "${{ github.actor }}",
               "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
