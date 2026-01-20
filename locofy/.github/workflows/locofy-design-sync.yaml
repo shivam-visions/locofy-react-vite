@@ -1,0 +1,173 @@
+# ============================================================================
+# LOCOFY DESIGN SYNC WORKFLOW
+# ============================================================================
+# This workflow triggers when new design code is pushed from Locofy.
+# It detects changed components and triggers the design integration workflow
+# in the main project repository.
+#
+# Required Secrets:
+#   - MAIN_REPO_PAT: Personal Access Token with repo access to Saleslabdev/frontend
+#
+# ============================================================================
+
+name: Locofy Design Sync
+
+on:
+  push:
+    branches:
+      - main
+      - locofy/**
+    paths:
+      - 'src/**'
+      - 'public/**'
+  workflow_dispatch:
+    inputs:
+      component_name:
+        description: 'Specific component to sync (e.g., Login, Dashboard)'
+        required: false
+        type: string
+      force_sync:
+        description: 'Force sync even if no changes detected'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  MAIN_REPO: Saleslabdev/frontend
+  MAIN_REPO_BRANCH: test
+  
+jobs:
+  detect-changes:
+    name: Detect Changed Components
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.detect.outputs.components }}
+      has_changes: ${{ steps.detect.outputs.has_changes }}
+      
+    steps:
+      - name: Checkout Locofy Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          
+      - name: Detect Changed Components
+        id: detect
+        run: |
+          echo "🔍 Detecting changed components..."
+          
+          # Get list of changed files
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.component_name }}" ]; then
+            # Manual trigger with specific component
+            COMPONENTS='["${{ github.event.inputs.component_name }}"]'
+            HAS_CHANGES="true"
+          else
+            # Auto-detect from git diff
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- 'src/**/*.tsx' 'src/**/*.ts' 'src/**/*.jsx' 'src/**/*.js' 'src/**/*.css' 2>/dev/null || echo "")
+            
+            if [ -z "$CHANGED_FILES" ]; then
+              echo "No component files changed"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+              echo "components=[]" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            # Extract unique component names from file paths
+            # Pattern: src/pages/ComponentName/ or src/components/ComponentName/
+            COMPONENTS=$(echo "$CHANGED_FILES" | \
+              grep -oE 'src/(pages|components)/[^/]+' | \
+              sed 's|src/pages/||g; s|src/components/||g' | \
+              sort -u | \
+              jq -R -s -c 'split("\n") | map(select(length > 0))')
+            
+            # If no components detected from path pattern, use filename
+            if [ "$COMPONENTS" == "[]" ] || [ -z "$COMPONENTS" ]; then
+              COMPONENTS=$(echo "$CHANGED_FILES" | \
+                xargs -I {} basename {} | \
+                sed 's/\.[^.]*$//' | \
+                sort -u | \
+                jq -R -s -c 'split("\n") | map(select(length > 0))')
+            fi
+            
+            HAS_CHANGES="true"
+          fi
+          
+          echo "📦 Detected components: $COMPONENTS"
+          echo "components=$COMPONENTS" >> $GITHUB_OUTPUT
+          echo "has_changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
+          
+      - name: Summary
+        if: steps.detect.outputs.has_changes == 'true'
+        run: |
+          echo "## 🎨 Locofy Design Changes Detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Components to sync:**" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.detect.outputs.components }}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  trigger-integration:
+    name: Trigger Main Repo Integration
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Locofy Repository
+        uses: actions/checkout@v4
+        
+      - name: Prepare Component Data
+        id: prepare
+        run: |
+          echo "📦 Preparing component data for transfer..."
+          
+          # Create a manifest of all files to transfer
+          MANIFEST=$(find src -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" -o -name "*.css" -o -name "*.scss" \) | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "manifest=$MANIFEST" >> $GITHUB_OUTPUT
+          
+          # Get the commit info
+          echo "commit_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "commit_message<<EOF" >> $GITHUB_OUTPUT
+          git log -1 --pretty=%B >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: Trigger Design Integration Workflow
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.MAIN_REPO_PAT }}
+          repository: ${{ env.MAIN_REPO }}
+          event-type: locofy-design-update
+          client-payload: |
+            {
+              "components": ${{ needs.detect-changes.outputs.components }},
+              "locofy_repo": "${{ github.repository }}",
+              "locofy_branch": "${{ github.ref_name }}",
+              "locofy_sha": "${{ github.sha }}",
+              "locofy_commit_message": "${{ steps.prepare.outputs.commit_message }}",
+              "target_branch": "${{ env.MAIN_REPO_BRANCH }}",
+              "triggered_by": "${{ github.actor }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+            
+      - name: Success Summary
+        run: |
+          echo "## ✅ Design Integration Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Repository:** ${{ env.MAIN_REPO }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Branch:** ${{ env.MAIN_REPO_BRANCH }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Components:** ${{ needs.detect-changes.outputs.components }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 Check the main repository for the integration progress." >> $GITHUB_STEP_SUMMARY
+
+  notify-no-changes:
+    name: Notify No Changes
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes != 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: No Changes Summary
+        run: |
+          echo "## ℹ️ No Design Changes Detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "No component files were changed in this push." >> $GITHUB_STEP_SUMMARY
+          echo "If you expected changes, ensure your files are in \`src/pages/\` or \`src/components/\`." >> $GITHUB_STEP_SUMMARY

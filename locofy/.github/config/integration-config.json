@@ -1,0 +1,141 @@
+{
+  "version": "1.0.0",
+  "description": "Configuration for Locofy to Main Project design integration",
+  
+  "repositories": {
+    "locofy": {
+      "owner": "shivam-visions",
+      "name": "locofy-react-vite",
+      "branch": "main",
+      "source_path": "locofy/src"
+    },
+    "main_project": {
+      "owner": "Saleslabdev",
+      "name": "frontend",
+      "branch": "test",
+      "base_path": "frontend"
+    }
+  },
+  
+  "component_mapping": {
+    "strategy": "auto_detect",
+    "description": "Auto-detect by filename (case-insensitive matching)",
+    "search_paths": {
+      "locofy": [
+        "src/pages",
+        "src/components"
+      ],
+      "main_project": [
+        "services/Auth/pages",
+        "features",
+        "src/shared_client/pages",
+        "src/shared_client/components",
+        "src/admin",
+        "src/broker_platform",
+        "src/insurer_portal"
+      ]
+    },
+    "explicit_mappings": {
+      "_comment": "Add explicit mappings here if auto-detect doesn't work for specific components",
+      "examples": {
+        "Login": "services/Auth/pages/LoginPage/LoginPage.tsx",
+        "SignIn": "services/Auth/pages/LoginPage/components/SignIn.tsx",
+        "Dashboard": "src/admin/pages/Dashboard/Dashboard.tsx"
+      }
+    }
+  },
+  
+  "backup_settings": {
+    "create_backup_branch": true,
+    "backup_branch_prefix": "backup/",
+    "backup_folder": "_backups",
+    "keep_locofy_original": true,
+    "keep_main_original": true
+  },
+  
+  "integration_settings": {
+    "create_integration_branch": true,
+    "integration_branch_prefix": "design-update/",
+    "auto_create_pr": true,
+    "pr_labels": ["design", "automated", "needs-review"],
+    "pr_reviewers": [],
+    "require_approval": true
+  },
+  
+  "ai_settings": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 8192,
+    "fallback_model": "claude-sonnet-4-20250514",
+    "retry_attempts": 2,
+    "prompts_file": ".github/prompts/integration-prompts.json"
+  },
+  
+  "notifications": {
+    "slack": {
+      "enabled": true,
+      "on_success": true,
+      "on_failure": true,
+      "channel": "#design-updates"
+    },
+    "email": {
+      "enabled": true,
+      "on_success": true,
+      "on_failure": true,
+      "recipients": []
+    }
+  },
+  
+  "conflict_handling": {
+    "on_file_not_found": "create_new",
+    "on_multiple_matches": "use_first_match",
+    "on_ai_failure": "create_pr_with_both_versions",
+    "on_type_mismatch": "flag_for_review"
+  },
+  
+  "file_patterns": {
+    "include": [
+      "**/*.tsx",
+      "**/*.ts",
+      "**/*.jsx",
+      "**/*.js",
+      "**/*.css",
+      "**/*.scss"
+    ],
+    "exclude": [
+      "**/node_modules/**",
+      "**/*.test.*",
+      "**/*.spec.*",
+      "**/dist/**",
+      "**/build/**"
+    ]
+  },
+  
+  "project_standards": {
+    "description": "Standards extracted from Saleslabdev/frontend",
+    "styling": {
+      "framework": "MUI v5",
+      "method": "sx prop",
+      "theme_usage": true
+    },
+    "typescript": {
+      "strict": true,
+      "interfaces_pattern": "interface Props { }",
+      "component_typing": "FC<Props>"
+    },
+    "imports": {
+      "alias": "@/",
+      "alias_path": "frontend/",
+      "order": ["react", "external", "internal", "relative"]
+    },
+    "components": {
+      "pattern": "functional",
+      "export_style": "named",
+      "folder_structure": "ComponentName/index.ts"
+    },
+    "testing": {
+      "attributes": "data-testid",
+      "framework": "Playwright"
+    }
+  }
+}

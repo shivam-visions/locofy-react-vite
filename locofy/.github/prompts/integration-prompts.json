@@ -1,0 +1,88 @@
+{
+  "version": "1.0.0",
+  "description": "Prompt templates for Locofy design integration using R-T-F and CARE frameworks",
+  "frameworks": ["R-T-F (Role-Task-Format)", "CARE (Context-Action-Result-Example)"],
+  
+  "prompts": {
+    "analysis": {
+      "id": "prompt_1_analysis",
+      "name": "Code Analysis & Standard Extraction",
+      "phase": 1,
+      "description": "Analyze existing codebase and extract coding standards",
+      "template": "ROLE: You are a senior frontend architect analyzing codebases for consistency.\n\nCONTEXT: I have a new design-generated code file from Locofy. First, analyze our existing codebase structure and extract our coding standards.\n\nTASK:\n1. Analyze the current component directory and related components\n2. Extract patterns for:\n   - Component structure (functional vs class, export patterns)\n   - Styling methodology (MUI, Tailwind, CSS modules, styled-components)\n   - State management patterns (React hooks, Zustand, Redux patterns)\n   - File/folder naming conventions (kebab-case, PascalCase)\n   - Import organization patterns\n   - Prop/interface naming conventions\n   - Error handling approaches\n   - Accessibility standards in place\n\nFORMAT: Provide a structured analysis with:\n- Current standards summary\n- Inconsistencies found\n- Recommendations for the new code alignment\n\n## EXISTING CODE TO ANALYZE:\n```tsx\n{{EXISTING_CODE}}\n```",
+      "variables": ["EXISTING_CODE"]
+    },
+    
+    "refactoring": {
+      "id": "prompt_2_refactoring",
+      "name": "Design-to-Code Refactoring",
+      "phase": 2,
+      "description": "Transform Locofy output to project standards",
+      "template": "ROLE: You are a React refactoring specialist who transforms generated code into production-ready code following established patterns.\n\nCONTEXT:\n- Source: Locofy-generated React code\n- Target: Our existing codebase structure\n- Current patterns: MUI with sx prop, TypeScript, functional components with FC<Props>, @/ import aliases, data-testid attributes\n\nTASK: Transform the generated code with these priorities:\n\n1. STRUCTURE:\n   - Match our component export patterns (named exports preferred)\n   - Use our existing folder structure for assets, components, hooks\n   - Implement our file naming conventions (PascalCase for components)\n\n2. STYLING:\n   - Convert inline styles to MUI sx prop system\n   - Extract repeated styles to theme or constants\n   - Ensure responsive breakpoints match our mobile-first approach\n\n3. COMPONENTS:\n   - Replace generic elements with MUI components where applicable\n   - Break down monolithic components using our pattern\n   - Apply our prop interface patterns (interface Props with FC<Props>)\n\n4. STATE & LOGIC:\n   - Implement our custom hooks pattern for form handling (useFormActions)\n   - Add proper loading/error states following our patterns\n   - Integrate with our authentication context (useAuthContext)\n\n5. QUALITY:\n   - Add comprehensive TypeScript interfaces\n   - Implement our error handling patterns\n   - Add ARIA labels and accessibility features\n   - Include proper form validation\n   - Add data-testid attributes for testing\n\nFORMAT:\n- Provide the refactored code\n- Highlight major changes made\n- Note any decisions made for consistency\n- List any new shared components that should be created\n\n## LOCOFY GENERATED CODE:\n```tsx\n{{LOCOFY_CODE}}\n```\n\n## PROJECT PATTERNS TO FOLLOW (example from existing codebase):\n```tsx\n{{EXISTING_CODE}}\n```",
+      "variables": ["LOCOFY_CODE", "EXISTING_CODE"]
+    },
+    
+    "integration": {
+      "id": "prompt_3_integration",
+      "name": "Integration & Testing",
+      "phase": 3,
+      "description": "Ensure seamless integration with the application",
+      "template": "ROLE: You are an integration specialist ensuring the new page works seamlessly with our application.\n\nCONTEXT: We have a refactored component ready for integration.\n\nTASK:\n1. ROUTING INTEGRATION:\n   - Ensure the new component uses our routing patterns (React Router v6+ patterns)\n   - Update route configuration if needed\n   - Add proper lazy loading if it's our standard\n\n2. API INTEGRATION:\n   - Connect to our existing API services\n   - Use our API client patterns (axios/fetch wrappers)\n   - Implement proper loading/error states from our design system\n\n3. STATE SYNCHRONIZATION:\n   - Integrate with our global state (authentication context)\n   - Ensure proper session persistence patterns\n   - Handle token management as per our standards\n\n4. TEST PREPARATION:\n   - Add data-testid attributes following our testing conventions\n   - Ensure the component works with our existing integration tests\n   - Verify all interactive elements are properly accessible\n\n5. PERFORMANCE:\n   - Implement code splitting if not already present\n   - Optimize images/assets using our asset pipeline\n   - Add proper memoization where needed\n\nFORMAT: Provide integration steps and verify:\n- Routing works correctly\n- API calls follow our patterns\n- State updates properly\n- Tests pass with minimal changes\n- No breaking changes to existing functionality\n\n## REFACTORED CODE TO INTEGRATE:\n```tsx\n{{REFACTORED_CODE}}\n```\n\n## EXISTING INTEGRATION PATTERNS:\n```tsx\n{{EXISTING_PATTERNS}}\n```",
+      "variables": ["REFACTORED_CODE", "EXISTING_PATTERNS"]
+    },
+    
+    "review": {
+      "id": "prompt_4_review",
+      "name": "Code Review & Consistency Check",
+      "phase": 4,
+      "description": "Final validation and consistency check",
+      "template": "ROLE: You are a meticulous code reviewer focusing on consistency and maintainability.\n\nCONTEXT: We have integrated a new component. Now perform a final consistency check.\n\nTASK: Compare the new component against similar pages in our codebase:\n\n1. PATTERN CONSISTENCY:\n   - Compare with similar components for form handling patterns\n   - Compare with other pages for layout integration\n   - Compare with existing pages for API integration patterns\n\n2. STYLE AUDIT:\n   - Verify MUI theme/design token usage matches our system\n   - Ensure spacing scales (margin/padding) are consistent\n   - Check typography hierarchy follows our type scale\n\n3. PERFORMANCE AUDIT:\n   - Check bundle size impact\n   - Verify no duplicate dependencies\n   - Ensure proper tree-shaking compatibility\n\n4. MAINTAINABILITY:\n   - Verify clear separation of concerns\n   - Check for proper documentation/comments\n   - Ensure meaningful component/variable names\n\nFORMAT: Provide a checklist with:\n- Consistent patterns found\n- Minor inconsistencies (list them)\n- Major inconsistencies requiring fixes\n- Recommendations for future improvements\n\n## NEW INTEGRATED CODE:\n```tsx\n{{NEW_CODE}}\n```\n\n## COMPARISON CODE (similar existing component):\n```tsx\n{{COMPARISON_CODE}}\n```",
+      "variables": ["NEW_CODE", "COMPARISON_CODE"]
+    },
+    
+    "documentation": {
+      "id": "prompt_5_documentation",
+      "name": "Context Maintenance",
+      "phase": 5,
+      "description": "Update documentation with new patterns",
+      "template": "ROLE: You are a knowledge manager maintaining coding standards documentation.\n\nCONTEXT: Our codebase standards evolve over time.\n\nTASK: After this successful design integration:\n1. Document new patterns established\n2. Document decisions made during refactoring\n3. List components that should be added to our shared library\n4. Note any gotchas or special considerations\n\nFORMAT: Provide:\n- Updated documentation entries\n- A reusable transformation template for future integrations\n- Standard transformation steps\n- Common replacements (Locofy → Our Components)\n- Testing requirements checklist\n\n## INTEGRATION SUMMARY:\nComponent: {{COMPONENT_NAME}}\nChanges Made: {{CHANGES_SUMMARY}}\nNew Patterns: {{NEW_PATTERNS}}",
+      "variables": ["COMPONENT_NAME", "CHANGES_SUMMARY", "NEW_PATTERNS"]
+    },
+    
+    "edge_cases": {
+      "id": "prompt_edge_cases",
+      "name": "Edge Case Handler",
+      "phase": 0,
+      "description": "Handle design-system mismatches",
+      "template": "ROLE: You are a problem solver for design-system mismatches.\n\nCONTEXT: Locofy generated code that doesn't map cleanly to our system.\n\nSPECIFIC ISSUE: {{ISSUE_DESCRIPTION}}\n\nTASK:\n1. Identify the closest equivalent in our system\n2. Create an adapter component if needed\n3. Document the mapping for future reference\n4. Suggest updates to our component library to prevent future mismatches\n\nCONSTRAINTS:\n- Must maintain design fidelity\n- Cannot break existing functionality\n- Must follow our performance budgets\n\n## PROBLEMATIC LOCOFY CODE:\n```tsx\n{{LOCOFY_CODE}}\n```\n\n## OUR SYSTEM'S APPROACH:\n```tsx\n{{OUR_APPROACH}}\n```",
+      "variables": ["ISSUE_DESCRIPTION", "LOCOFY_CODE", "OUR_APPROACH"]
+    },
+    
+    "merge": {
+      "id": "prompt_merge",
+      "name": "Intelligent Code Merge",
+      "phase": 2,
+      "description": "Merge Locofy design with existing functionality",
+      "template": "You are a senior React developer specializing in code refactoring and design integration.\n\n## TASK\nMerge the NEW DESIGN code from Locofy with the EXISTING FUNCTIONALITY code from our project.\n\n## RULES\n1. **PRESERVE ALL FUNCTIONALITY**: Keep ALL hooks, state management, API calls, event handlers, context usage, and business logic from the existing code\n2. **APPLY NEW DESIGN**: Use the JSX structure, styling (sx props, CSS), and visual layout from the Locofy code\n3. **FOLLOW PROJECT STANDARDS**:\n   - Use MUI components with sx prop for styling (NOT inline styles or CSS modules)\n   - Use functional components with FC<Props> typing\n   - Keep existing import patterns and aliases (@/ paths)\n   - Maintain data-testid attributes for testing\n   - Keep TypeScript interfaces\n4. **COMPONENT STRUCTURE**: If Locofy has new sub-components, create them following our pattern (folder with index.ts)\n5. **DO NOT**:\n   - Remove any existing functionality\n   - Change API integration patterns\n   - Remove error handling or loading states\n   - Remove authentication logic\n   - Change prop interfaces unless adding new design-related props\n\n## OUTPUT FORMAT\nReturn ONLY the merged code. No explanations, no markdown code blocks, just the pure TypeScript/React code.\nStart directly with the import statements.\n\n## EXISTING CODE (preserve functionality):\n```tsx\n{{EXISTING_CODE}}\n```\n\n## NEW DESIGN CODE (apply design):\n```tsx\n{{LOCOFY_CODE}}\n```\n\nMerge these for the {{COMPONENT_NAME}} component. Return ONLY the merged code.",
+      "variables": ["EXISTING_CODE", "LOCOFY_CODE", "COMPONENT_NAME"]
+    }
+  },
+  
+  "project_standards": {
+    "styling": "MUI with sx prop",
+    "state_management": ["React Context", "Zustand", "TanStack React Query"],
+    "component_pattern": "Functional components with FC<Props>",
+    "file_structure": "PascalCase folders with index.ts exports",
+    "testing": "data-testid attributes, Playwright",
+    "imports": "@/ alias for src directory"
+  },
+  
+  "execution_order": [
+    "analysis",
+    "refactoring", 
+    "merge",
+    "integration",
+    "review",
+    "documentation"
+  ]
+}
