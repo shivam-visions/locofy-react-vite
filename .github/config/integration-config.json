@@ -18,8 +18,8 @@
   },
   
   "component_mapping": {
-    "strategy": "auto_detect",
-    "description": "Auto-detect by filename (case-insensitive matching)",
+    "strategy": "explicit_first",
+    "description": "Check explicit mappings first, then auto-detect by filename (case-insensitive matching)",
     "search_paths": {
       "locofy": [
         "src/pages",
@@ -36,11 +36,13 @@
       ]
     },
     "explicit_mappings": {
-      "_comment": "Add explicit mappings here if auto-detect doesn't work for specific components",
+      "_comment": "Explicit mappings take priority over auto-detection. Format: 'LocofyComponentName': 'path/in/main/repo.tsx'",
+      "Login": "services/Auth/pages/LoginPage/LoginPage.tsx",
+      "SignIn": "services/Auth/pages/LoginPage/components/SignIn.tsx",
+      "Dashboard": "src/admin/pages/Dashboard/Dashboard.tsx",
       "examples": {
-        "Login": "services/Auth/pages/LoginPage/LoginPage.tsx",
-        "SignIn": "services/Auth/pages/LoginPage/components/SignIn.tsx",
-        "Dashboard": "src/admin/pages/Dashboard/Dashboard.tsx"
+        "_note": "Add your component mappings above this examples block",
+        "ExampleComponent": "path/to/ExampleComponent.tsx"
       }
     }
   },

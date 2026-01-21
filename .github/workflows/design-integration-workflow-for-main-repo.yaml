@@ -1,0 +1,832 @@
+# ============================================================================
+# DESIGN INTEGRATION WORKFLOW (FOR MAIN REPOSITORY) - IMPROVED VERSION
+# ============================================================================
+# 
+# IMPORTANT: This file should be copied to the MAIN REPOSITORY (Saleslabdev/frontend)
+# at path: .github/workflows/design-integration.yaml
+#
+# This workflow receives triggers from the Locofy repository and:
+# 1. Fetches configuration from Locofy repo (mappings, prompts, standards)
+# 2. Creates backup branches for safety
+# 3. Fetches new design code from Locofy
+# 4. Uses Claude AI to intelligently merge design with existing functionality
+# 5. Validates TypeScript compilation
+# 6. Creates a PR for review
+# 7. Sends notifications (Email + Slack)
+#
+# IMPROVEMENTS OVER ORIGINAL:
+# - Reads integration-config.json for explicit component mappings
+# - Reads integration-prompts.json for detailed AI prompts
+# - Fixed shell variable scope issues
+# - Processes multiple files per component
+# - Adds TypeScript validation
+# - Better error handling and reporting
+#
+# Required Secrets:
+#   - ANTHROPIC_API_KEY: Claude API key for AI-assisted merging
+#   - LOCOFY_REPO_PAT: PAT with read access to Locofy repository
+#   - SLACK_WEBHOOK_URL: (Optional) Slack webhook for notifications
+#   - SMTP_SERVER: (Optional) SMTP server for email notifications
+#   - SMTP_PORT: (Optional) SMTP port
+#   - SMTP_USERNAME: (Optional) SMTP username
+#   - SMTP_PASSWORD: (Optional) SMTP password
+#   - NOTIFICATION_EMAIL: (Optional) Email to send notifications to
+#
+# ============================================================================
+
+name: Design Integration
+
+on:
+  repository_dispatch:
+    types: [locofy-design-update]
+  workflow_dispatch:
+    inputs:
+      locofy_repo:
+        description: 'Locofy repository (owner/repo)'
+        required: true
+        default: 'shivam-visions/locofy-react-vite'
+      locofy_branch:
+        description: 'Locofy branch to fetch from'
+        required: true
+        default: 'main'
+      components:
+        description: 'Components to integrate (JSON array, e.g., ["Login", "Dashboard"])'
+        required: true
+        default: '["Login"]'
+      target_branch:
+        description: 'Target branch in this repo'
+        required: true
+        default: 'test'
+
+env:
+  LOCOFY_CLONE_PATH: _locofy_source
+  BACKUP_FOLDER: _backups
+  WORK_DIR: .integration_work
+  
+jobs:
+  setup:
+    name: Setup & Validation
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.parse.outputs.components }}
+      timestamp: ${{ steps.parse.outputs.timestamp }}
+      integration_branch: ${{ steps.parse.outputs.integration_branch }}
+      backup_branch: ${{ steps.parse.outputs.backup_branch }}
+      locofy_repo: ${{ steps.parse.outputs.locofy_repo }}
+      locofy_branch: ${{ steps.parse.outputs.locofy_branch }}
+      target_branch: ${{ steps.parse.outputs.target_branch }}
+      
+    steps:
+      - name: Parse Inputs
+        id: parse
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          
+          # Handle both repository_dispatch and workflow_dispatch
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            COMPONENTS='${{ toJSON(github.event.client_payload.components) }}'
+            LOCOFY_REPO="${{ github.event.client_payload.locofy_repo }}"
+            LOCOFY_BRANCH="${{ github.event.client_payload.locofy_branch }}"
+            TARGET_BRANCH="${{ github.event.client_payload.target_branch }}"
+          else
+            COMPONENTS='${{ github.event.inputs.components }}'
+            LOCOFY_REPO="${{ github.event.inputs.locofy_repo }}"
+            LOCOFY_BRANCH="${{ github.event.inputs.locofy_branch }}"
+            TARGET_BRANCH="${{ github.event.inputs.target_branch }}"
+          fi
+          
+          # Generate branch names
+          COMPONENT_SLUG=$(echo "$COMPONENTS" | jq -r '.[0]' | tr '[:upper:]' '[:lower:]')
+          INTEGRATION_BRANCH="design-update/${COMPONENT_SLUG}-${TIMESTAMP}"
+          BACKUP_BRANCH="backup/${COMPONENT_SLUG}-${TIMESTAMP}"
+          
+          echo "components=$COMPONENTS" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "integration_branch=$INTEGRATION_BRANCH" >> $GITHUB_OUTPUT
+          echo "backup_branch=$BACKUP_BRANCH" >> $GITHUB_OUTPUT
+          echo "locofy_repo=$LOCOFY_REPO" >> $GITHUB_OUTPUT
+          echo "locofy_branch=$LOCOFY_BRANCH" >> $GITHUB_OUTPUT
+          echo "target_branch=$TARGET_BRANCH" >> $GITHUB_OUTPUT
+          
+      - name: Validation Summary
+        run: |
+          echo "## 🚀 Design Integration Started" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Components | ${{ steps.parse.outputs.components }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Locofy Repo | ${{ steps.parse.outputs.locofy_repo }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Locofy Branch | ${{ steps.parse.outputs.locofy_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Branch | ${{ steps.parse.outputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Branch | ${{ steps.parse.outputs.integration_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backup Branch | ${{ steps.parse.outputs.backup_branch }} |" >> $GITHUB_STEP_SUMMARY
+
+  backup:
+    name: Create Backups
+    needs: setup
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Main Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.target_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Create Backup Branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create backup branch from current state
+          git checkout -b ${{ needs.setup.outputs.backup_branch }}
+          git push origin ${{ needs.setup.outputs.backup_branch }}
+          
+          echo "✅ Backup branch created: ${{ needs.setup.outputs.backup_branch }}" >> $GITHUB_STEP_SUMMARY
+
+  integrate:
+    name: AI-Powered Design Integration
+    needs: [setup, backup]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Main Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.target_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Clone Locofy Repository
+        run: |
+          git clone --depth 1 --branch ${{ needs.setup.outputs.locofy_branch }} \
+            https://x-access-token:${{ secrets.LOCOFY_REPO_PAT }}@github.com/${{ needs.setup.outputs.locofy_repo }}.git \
+            ${{ env.LOCOFY_CLONE_PATH }}
+            
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Create Work Directory
+        run: mkdir -p ${{ env.WORK_DIR }}
+          
+      # ========================================================================
+      # NEW: Fetch and Parse Configuration from Locofy Repository
+      # ========================================================================
+      - name: Fetch Integration Configuration
+        id: config
+        run: |
+          echo "📋 Fetching integration configuration..."
+          
+          CONFIG_FILE="${{ env.LOCOFY_CLONE_PATH }}/.github/config/integration-config.json"
+          PROMPTS_FILE="${{ env.LOCOFY_CLONE_PATH }}/.github/prompts/integration-prompts.json"
+          
+          # Check if config exists
+          if [ -f "$CONFIG_FILE" ]; then
+            cp "$CONFIG_FILE" "${{ env.WORK_DIR }}/config.json"
+            echo "✅ Configuration file loaded"
+            echo "config_loaded=true" >> $GITHUB_OUTPUT
+            
+            # Extract explicit mappings (exclude nested 'examples' and '_comment' keys)
+            EXPLICIT_MAPPINGS=$(jq -c '.component_mapping.explicit_mappings | del(.examples, ._comment) // {}' "$CONFIG_FILE")
+            echo "explicit_mappings=$EXPLICIT_MAPPINGS" >> $GITHUB_OUTPUT
+            
+            # Extract search paths for main project
+            SEARCH_PATHS=$(jq -c '.component_mapping.search_paths.main_project // []' "$CONFIG_FILE")
+            echo "search_paths=$SEARCH_PATHS" >> $GITHUB_OUTPUT
+            
+            # Extract project standards
+            STYLING_FRAMEWORK=$(jq -r '.project_standards.styling.framework // "MUI v5"' "$CONFIG_FILE")
+            STYLING_METHOD=$(jq -r '.project_standards.styling.method // "sx prop"' "$CONFIG_FILE")
+            IMPORT_ALIAS=$(jq -r '.project_standards.imports.alias // "@/"' "$CONFIG_FILE")
+            
+            echo "styling_framework=$STYLING_FRAMEWORK" >> $GITHUB_OUTPUT
+            echo "styling_method=$STYLING_METHOD" >> $GITHUB_OUTPUT
+            echo "import_alias=$IMPORT_ALIAS" >> $GITHUB_OUTPUT
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📋 Configuration Loaded" >> $GITHUB_STEP_SUMMARY
+            echo "- Styling: $STYLING_FRAMEWORK with $STYLING_METHOD" >> $GITHUB_STEP_SUMMARY
+            echo "- Import Alias: $IMPORT_ALIAS" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No configuration file found, using defaults"
+            echo "config_loaded=false" >> $GITHUB_OUTPUT
+            echo "explicit_mappings={}" >> $GITHUB_OUTPUT
+            echo "search_paths=[]" >> $GITHUB_OUTPUT
+            echo "styling_framework=MUI v5" >> $GITHUB_OUTPUT
+            echo "styling_method=sx prop" >> $GITHUB_OUTPUT
+            echo "import_alias=@/" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check if prompts file exists
+          if [ -f "$PROMPTS_FILE" ]; then
+            cp "$PROMPTS_FILE" "${{ env.WORK_DIR }}/prompts.json"
+            echo "✅ Prompts file loaded"
+            echo "prompts_loaded=true" >> $GITHUB_OUTPUT
+            
+            # Extract the merge prompt template
+            MERGE_PROMPT=$(jq -r '.prompts.merge.template // ""' "$PROMPTS_FILE")
+            if [ -n "$MERGE_PROMPT" ]; then
+              # Save to file to avoid shell escaping issues
+              echo "$MERGE_PROMPT" > "${{ env.WORK_DIR }}/merge_prompt_template.txt"
+            fi
+          else
+            echo "⚠️ No prompts file found, using default prompt"
+            echo "prompts_loaded=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Create Integration Branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b ${{ needs.setup.outputs.integration_branch }}
+          
+      # ========================================================================
+      # IMPROVED: Find & Match Components with Explicit Mappings Support
+      # ========================================================================
+      - name: Find & Match Components
+        id: match
+        run: |
+          COMPONENTS='${{ needs.setup.outputs.components }}'
+          EXPLICIT_MAPPINGS='${{ steps.config.outputs.explicit_mappings }}'
+          SEARCH_PATHS='${{ steps.config.outputs.search_paths }}'
+          
+          echo "📍 Explicit Mappings: $EXPLICIT_MAPPINGS"
+          echo "📍 Search Paths: $SEARCH_PATHS"
+          
+          # Initialize match report
+          echo "" > "${{ env.WORK_DIR }}/match_report.txt"
+          
+          # Process each component - using process substitution to avoid subshell issues
+          while IFS= read -r COMPONENT; do
+            [ -z "$COMPONENT" ] && continue
+            
+            echo ""
+            echo "🔍 ============================================="
+            echo "🔍 Searching for component: $COMPONENT"
+            echo "🔍 ============================================="
+            
+            # Initialize file lists
+            LOCOFY_FILES=""
+            MAIN_FILE=""
+            
+            # --------------------------------------------------------------
+            # Step 1: Check explicit mappings first (highest priority)
+            # --------------------------------------------------------------
+            EXPLICIT_PATH=$(echo "$EXPLICIT_MAPPINGS" | jq -r --arg comp "$COMPONENT" '.[$comp] // empty')
+            
+            if [ -n "$EXPLICIT_PATH" ] && [ -f "$EXPLICIT_PATH" ]; then
+              echo "✅ Found explicit mapping: $EXPLICIT_PATH"
+              MAIN_FILE="$EXPLICIT_PATH"
+              echo "  Using explicit mapping" >> "${{ env.WORK_DIR }}/match_report.txt"
+            else
+              echo "ℹ️ No explicit mapping found, searching..."
+              
+              # --------------------------------------------------------------
+              # Step 2: Search in configured paths with priority
+              # --------------------------------------------------------------
+              
+              # Build search command for main project
+              # Priority 1: Exact match (ComponentName.tsx)
+              # Priority 2: Folder match (ComponentName/ComponentName.tsx)
+              # Priority 3: Partial match (*ComponentName*.tsx)
+              
+              FOUND_FILES=""
+              
+              # Search in configured paths or fallback to common paths
+              if [ "$SEARCH_PATHS" != "[]" ] && [ -n "$SEARCH_PATHS" ]; then
+                PATHS_TO_SEARCH=$(echo "$SEARCH_PATHS" | jq -r '.[]')
+              else
+                PATHS_TO_SEARCH="services/Auth/pages
+          features
+          src/shared_client/pages
+          src/shared_client/components
+          src/admin
+          src/broker_platform
+          src/insurer_portal
+          src/pages
+          src/components"
+              fi
+              
+              # Search each path
+              while IFS= read -r SEARCH_PATH; do
+                [ -z "$SEARCH_PATH" ] && continue
+                [ ! -d "$SEARCH_PATH" ] && continue
+                
+                # Priority 1: Exact filename match
+                EXACT_MATCH=$(find "$SEARCH_PATH" -type f -name "${COMPONENT}.tsx" 2>/dev/null | head -1)
+                if [ -n "$EXACT_MATCH" ]; then
+                  MAIN_FILE="$EXACT_MATCH"
+                  echo "✅ Found exact match: $MAIN_FILE"
+                  break
+                fi
+                
+                # Priority 2: Folder/file pattern (ComponentName/ComponentName.tsx)
+                FOLDER_MATCH=$(find "$SEARCH_PATH" -type f -path "*/${COMPONENT}/${COMPONENT}.tsx" 2>/dev/null | head -1)
+                if [ -n "$FOLDER_MATCH" ]; then
+                  MAIN_FILE="$FOLDER_MATCH"
+                  echo "✅ Found folder match: $MAIN_FILE"
+                  break
+                fi
+                
+                # Priority 3: Case-insensitive partial match
+                PARTIAL_MATCH=$(find "$SEARCH_PATH" -type f -iname "*${COMPONENT}*.tsx" 2>/dev/null | head -1)
+                if [ -n "$PARTIAL_MATCH" ] && [ -z "$MAIN_FILE" ]; then
+                  MAIN_FILE="$PARTIAL_MATCH"
+                  echo "✅ Found partial match: $MAIN_FILE"
+                fi
+              done <<< "$PATHS_TO_SEARCH"
+              
+              # Fallback: Search entire repo if nothing found
+              if [ -z "$MAIN_FILE" ]; then
+                echo "⚠️ Searching entire repository..."
+                MAIN_FILE=$(find . -path "./${{ env.LOCOFY_CLONE_PATH }}" -prune -o \
+                  -path "./node_modules" -prune -o \
+                  -path "./.git" -prune -o \
+                  -type f -iname "*${COMPONENT}*.tsx" -print 2>/dev/null | \
+                  grep -v "test\|spec\|mock" | head -1)
+              fi
+            fi
+            
+            # --------------------------------------------------------------
+            # Step 3: Find Locofy source files (all related files)
+            # --------------------------------------------------------------
+            LOCOFY_TSX=$(find "${{ env.LOCOFY_CLONE_PATH }}/src" -type f -iname "*${COMPONENT}*.tsx" 2>/dev/null || echo "")
+            LOCOFY_TS=$(find "${{ env.LOCOFY_CLONE_PATH }}/src" -type f -iname "*${COMPONENT}*.ts" ! -name "*.tsx" 2>/dev/null || echo "")
+            LOCOFY_CSS=$(find "${{ env.LOCOFY_CLONE_PATH }}/src" -type f -iname "*${COMPONENT}*.css" 2>/dev/null || echo "")
+            LOCOFY_STYLES=$(find "${{ env.LOCOFY_CLONE_PATH }}/src" -type f -iname "*${COMPONENT}*.styles.ts" 2>/dev/null || echo "")
+            
+            # Combine all Locofy files
+            LOCOFY_FILES=$(echo -e "${LOCOFY_TSX}\n${LOCOFY_TS}\n${LOCOFY_CSS}\n${LOCOFY_STYLES}" | grep -v '^$' | sort -u)
+            
+            # --------------------------------------------------------------
+            # Step 4: Save results
+            # --------------------------------------------------------------
+            echo "$LOCOFY_FILES" > "${{ env.WORK_DIR }}/${COMPONENT}_locofy_files.txt"
+            echo "$MAIN_FILE" > "${{ env.WORK_DIR }}/${COMPONENT}_main_file.txt"
+            
+            # Find the main TSX file from Locofy (for AI merging)
+            LOCOFY_MAIN_TSX=$(echo "$LOCOFY_FILES" | grep -E "/${COMPONENT}\.tsx$|/${COMPONENT}/.*\.tsx$" | head -1)
+            if [ -z "$LOCOFY_MAIN_TSX" ]; then
+              LOCOFY_MAIN_TSX=$(echo "$LOCOFY_FILES" | grep "\.tsx$" | head -1)
+            fi
+            echo "$LOCOFY_MAIN_TSX" > "${{ env.WORK_DIR }}/${COMPONENT}_locofy_main.txt"
+            
+            echo ""
+            echo "📊 Match Results for $COMPONENT:"
+            echo "   Main project file: ${MAIN_FILE:-NOT FOUND}"
+            echo "   Locofy main TSX: ${LOCOFY_MAIN_TSX:-NOT FOUND}"
+            echo "   Total Locofy files: $(echo "$LOCOFY_FILES" | grep -c . || echo 0)"
+            
+            # Add to match report
+            if [ -n "$MAIN_FILE" ] && [ -n "$LOCOFY_MAIN_TSX" ]; then
+              echo "- ✅ $COMPONENT: Matched ($MAIN_FILE ← $LOCOFY_MAIN_TSX)" >> "${{ env.WORK_DIR }}/match_report.txt"
+            elif [ -z "$MAIN_FILE" ]; then
+              echo "- ⚠️ $COMPONENT: No target file found in main repo" >> "${{ env.WORK_DIR }}/match_report.txt"
+            else
+              echo "- ⚠️ $COMPONENT: No Locofy source found" >> "${{ env.WORK_DIR }}/match_report.txt"
+            fi
+            
+          done < <(echo "$COMPONENTS" | jq -r '.[]')
+          
+          echo ""
+          echo "📋 Match Report:"
+          cat "${{ env.WORK_DIR }}/match_report.txt"
+          
+      - name: Create Backup Copies
+        run: |
+          mkdir -p "${{ env.BACKUP_FOLDER }}/original"
+          mkdir -p "${{ env.BACKUP_FOLDER }}/locofy_design"
+          
+          COMPONENTS='${{ needs.setup.outputs.components }}'
+          
+          while IFS= read -r COMPONENT; do
+            [ -z "$COMPONENT" ] && continue
+            
+            # Backup original main file
+            MAIN_FILE=$(cat "${{ env.WORK_DIR }}/${COMPONENT}_main_file.txt" 2>/dev/null || echo "")
+            if [ -n "$MAIN_FILE" ] && [ -f "$MAIN_FILE" ]; then
+              mkdir -p "${{ env.BACKUP_FOLDER }}/original/$(dirname "$MAIN_FILE")"
+              cp "$MAIN_FILE" "${{ env.BACKUP_FOLDER }}/original/$MAIN_FILE"
+              echo "✅ Backed up: $MAIN_FILE"
+            fi
+            
+            # Copy all Locofy design files
+            while IFS= read -r LOCOFY_FILE; do
+              [ -z "$LOCOFY_FILE" ] && continue
+              [ ! -f "$LOCOFY_FILE" ] && continue
+              
+              DEST_PATH="${{ env.BACKUP_FOLDER }}/locofy_design/${LOCOFY_FILE#${{ env.LOCOFY_CLONE_PATH }}/}"
+              mkdir -p "$(dirname "$DEST_PATH")"
+              cp "$LOCOFY_FILE" "$DEST_PATH"
+              echo "✅ Copied Locofy file: $LOCOFY_FILE"
+            done < "${{ env.WORK_DIR }}/${COMPONENT}_locofy_files.txt"
+            
+          done < <(echo "$COMPONENTS" | jq -r '.[]')
+          
+      # ========================================================================
+      # IMPROVED: AI-Powered Code Integration with Better Prompts
+      # ========================================================================
+      - name: AI-Powered Code Integration
+        id: ai_integration
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          COMPONENTS='${{ needs.setup.outputs.components }}'
+          STYLING_FRAMEWORK='${{ steps.config.outputs.styling_framework }}'
+          STYLING_METHOD='${{ steps.config.outputs.styling_method }}'
+          IMPORT_ALIAS='${{ steps.config.outputs.import_alias }}'
+          
+          # Initialize report file (not a variable, to avoid subshell issues)
+          echo "" > "${{ env.WORK_DIR }}/integration_report.txt"
+          
+          # Check if we have a custom prompt template
+          CUSTOM_PROMPT_FILE="${{ env.WORK_DIR }}/merge_prompt_template.txt"
+          
+          # Process each component using process substitution
+          while IFS= read -r COMPONENT; do
+            [ -z "$COMPONENT" ] && continue
+            
+            echo ""
+            echo "🤖 ============================================="
+            echo "🤖 AI Processing: $COMPONENT"
+            echo "🤖 ============================================="
+            
+            # Get file paths
+            LOCOFY_FILE=$(cat "${{ env.WORK_DIR }}/${COMPONENT}_locofy_main.txt" 2>/dev/null || echo "")
+            MAIN_FILE=$(cat "${{ env.WORK_DIR }}/${COMPONENT}_main_file.txt" 2>/dev/null || echo "")
+            
+            # Validate files exist
+            if [ -z "$LOCOFY_FILE" ] || [ ! -f "$LOCOFY_FILE" ]; then
+              echo "⚠️ Locofy source file not found for $COMPONENT"
+              echo "- ⚠️ $COMPONENT: Locofy source not found" >> "${{ env.WORK_DIR }}/integration_report.txt"
+              continue
+            fi
+            
+            if [ -z "$MAIN_FILE" ] || [ ! -f "$MAIN_FILE" ]; then
+              echo "⚠️ Main project file not found for $COMPONENT"
+              echo "- ⚠️ $COMPONENT: Target file not found - consider creating new" >> "${{ env.WORK_DIR }}/integration_report.txt"
+              continue
+            fi
+            
+            echo "📄 Locofy: $LOCOFY_FILE"
+            echo "📄 Main: $MAIN_FILE"
+            
+            # Read file contents
+            LOCOFY_CONTENT=$(cat "$LOCOFY_FILE")
+            MAIN_CONTENT=$(cat "$MAIN_FILE")
+            
+            if [ -z "$LOCOFY_CONTENT" ] || [ -z "$MAIN_CONTENT" ]; then
+              echo "⚠️ Empty file content for $COMPONENT"
+              echo "- ⚠️ $COMPONENT: Empty file content" >> "${{ env.WORK_DIR }}/integration_report.txt"
+              continue
+            fi
+            
+            # Build the AI prompt - use custom if available, otherwise default
+            if [ -f "$CUSTOM_PROMPT_FILE" ]; then
+              echo "📋 Using custom prompt template from config"
+              BASE_PROMPT=$(cat "$CUSTOM_PROMPT_FILE")
+            else
+              echo "📋 Using default prompt"
+              BASE_PROMPT="You are a senior React developer specializing in code refactoring and design integration.
+
+## TASK
+Merge the NEW DESIGN code from Locofy with the EXISTING FUNCTIONALITY code from our project.
+
+## PROJECT STANDARDS
+- Styling Framework: ${STYLING_FRAMEWORK}
+- Styling Method: ${STYLING_METHOD} (use sx prop, NOT inline styles or CSS modules)
+- Import Alias: ${IMPORT_ALIAS}
+- Components: Functional components with FC<Props> typing
+- Testing: Include data-testid attributes
+
+## RULES
+1. **PRESERVE ALL FUNCTIONALITY**: Keep ALL hooks, state management, API calls, event handlers, context usage, and business logic from the existing code
+2. **APPLY NEW DESIGN**: Use the JSX structure, styling (sx props, CSS), and visual layout from the Locofy code
+3. **FOLLOW PROJECT STANDARDS**:
+   - Use ${STYLING_FRAMEWORK} components with ${STYLING_METHOD} for styling
+   - Use functional components with FC<Props> typing
+   - Keep existing import patterns and aliases (${IMPORT_ALIAS} paths)
+   - Maintain data-testid attributes for testing
+   - Keep TypeScript interfaces
+4. **COMPONENT STRUCTURE**: If Locofy has new sub-components, create them following our pattern (folder with index.ts)
+5. **DO NOT**:
+   - Remove any existing functionality
+   - Change API integration patterns
+   - Remove error handling or loading states
+   - Remove authentication logic
+   - Change prop interfaces unless adding new design-related props
+
+## OUTPUT FORMAT
+Return ONLY the merged code. No explanations, no markdown code blocks, just the pure TypeScript/React code.
+Start directly with the import statements."
+            fi
+            
+            # Call Claude API
+            echo "🔄 Calling Claude API..."
+            
+            RESPONSE=$(curl -s --max-time 120 https://api.anthropic.com/v1/messages \
+              -H "Content-Type: application/json" \
+              -H "x-api-key: $ANTHROPIC_API_KEY" \
+              -H "anthropic-version: 2023-06-01" \
+              -d "$(jq -n \
+                --arg prompt "$BASE_PROMPT" \
+                --arg locofy "$LOCOFY_CONTENT" \
+                --arg main "$MAIN_CONTENT" \
+                --arg component "$COMPONENT" \
+                '{
+                  model: "claude-sonnet-4-20250514",
+                  max_tokens: 8192,
+                  messages: [
+                    {
+                      role: "user",
+                      content: ($prompt + "\n\n## EXISTING CODE (preserve functionality):\n```tsx\n" + $main + "\n```\n\n## NEW DESIGN CODE (apply design):\n```tsx\n" + $locofy + "\n```\n\nMerge these for the " + $component + " component. Return ONLY the merged code.")
+                    }
+                  ]
+                }')")
+            
+            # Check for API errors
+            API_ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty')
+            if [ -n "$API_ERROR" ]; then
+              echo "❌ API Error: $API_ERROR"
+              echo "- ❌ $COMPONENT: API Error - $API_ERROR" >> "${{ env.WORK_DIR }}/integration_report.txt"
+              continue
+            fi
+            
+            # Extract the merged code
+            MERGED_CODE=$(echo "$RESPONSE" | jq -r '.content[0].text // empty')
+            
+            if [ -n "$MERGED_CODE" ] && [ "$MERGED_CODE" != "null" ]; then
+              # Remove potential markdown code blocks if AI added them
+              MERGED_CODE=$(echo "$MERGED_CODE" | sed '/^```tsx$/d' | sed '/^```typescript$/d' | sed '/^```$/d')
+              
+              # Write merged code to the main file
+              echo "$MERGED_CODE" > "$MAIN_FILE"
+              
+              echo "✅ Successfully merged: $COMPONENT"
+              echo "   Output: $MAIN_FILE"
+              echo "   Lines: $(wc -l < "$MAIN_FILE")"
+              
+              echo "- ✅ $COMPONENT: Merged successfully → $MAIN_FILE" >> "${{ env.WORK_DIR }}/integration_report.txt"
+            else
+              echo "❌ AI integration failed for $COMPONENT"
+              echo "Response: $RESPONSE"
+              echo "- ❌ $COMPONENT: AI returned empty response" >> "${{ env.WORK_DIR }}/integration_report.txt"
+            fi
+            
+          done < <(echo "$COMPONENTS" | jq -r '.[]')
+          
+          echo ""
+          echo "📋 Integration Report:"
+          cat "${{ env.WORK_DIR }}/integration_report.txt"
+          
+      # ========================================================================
+      # NEW: TypeScript Validation
+      # ========================================================================
+      - name: Install Dependencies
+        continue-on-error: true
+        run: |
+          if [ -f "package.json" ]; then
+            npm ci --prefer-offline --no-audit 2>/dev/null || npm install --prefer-offline --no-audit 2>/dev/null || echo "⚠️ Could not install dependencies"
+          fi
+          
+      - name: Validate TypeScript
+        id: typescript
+        continue-on-error: true
+        run: |
+          echo "🔍 Running TypeScript validation..."
+          
+          if command -v npx &> /dev/null && [ -f "tsconfig.json" ]; then
+            npx tsc --noEmit 2>&1 | tee "${{ env.WORK_DIR }}/tsc_output.txt" || true
+            
+            TSC_ERRORS=$(grep -c "error TS" "${{ env.WORK_DIR }}/tsc_output.txt" || echo "0")
+            
+            if [ "$TSC_ERRORS" -gt 0 ]; then
+              echo "⚠️ TypeScript found $TSC_ERRORS error(s)"
+              echo "typescript_errors=$TSC_ERRORS" >> $GITHUB_OUTPUT
+              echo "" >> "${{ env.WORK_DIR }}/integration_report.txt"
+              echo "### ⚠️ TypeScript Errors: $TSC_ERRORS" >> "${{ env.WORK_DIR }}/integration_report.txt"
+            else
+              echo "✅ TypeScript validation passed"
+              echo "typescript_errors=0" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "ℹ️ TypeScript check skipped (no tsconfig.json or npx not available)"
+            echo "typescript_errors=0" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Commit Changes
+        id: commit
+        run: |
+          git add -A
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            git commit -m "feat: integrate Locofy design for ${{ needs.setup.outputs.components }}
+
+          Automated design integration from Locofy repository.
+          
+          Source: ${{ needs.setup.outputs.locofy_repo }}@${{ needs.setup.outputs.locofy_branch }}
+          Components: ${{ needs.setup.outputs.components }}
+          Backup branch: ${{ needs.setup.outputs.backup_branch }}
+          
+          This PR was auto-generated. Please review carefully before merging."
+            
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Push Integration Branch
+        if: steps.commit.outputs.has_changes == 'true'
+        run: |
+          git push origin ${{ needs.setup.outputs.integration_branch }}
+          
+      - name: Create Pull Request
+        if: steps.commit.outputs.has_changes == 'true'
+        id: create_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INTEGRATION_REPORT=$(cat "${{ env.WORK_DIR }}/integration_report.txt" 2>/dev/null || echo "No detailed report available")
+          MATCH_REPORT=$(cat "${{ env.WORK_DIR }}/match_report.txt" 2>/dev/null || echo "")
+          TSC_ERRORS="${{ steps.typescript.outputs.typescript_errors }}"
+          
+          # Build TypeScript status
+          if [ "$TSC_ERRORS" = "0" ]; then
+            TSC_STATUS="✅ TypeScript validation passed"
+          else
+            TSC_STATUS="⚠️ TypeScript found $TSC_ERRORS error(s) - review needed"
+          fi
+          
+          PR_BODY="## 🎨 Automated Design Integration
+
+          This PR contains automatically integrated design changes from Locofy.
+
+          ### 📦 Components Updated
+          \`\`\`
+          ${{ needs.setup.outputs.components }}
+          \`\`\`
+
+          ### 🔍 Component Matching
+          $MATCH_REPORT
+
+          ### 🔄 Integration Report
+          $INTEGRATION_REPORT
+
+          ### 🔧 TypeScript Status
+          $TSC_STATUS
+
+          ### 🔒 Safety Backups
+          - **Backup Branch:** \`${{ needs.setup.outputs.backup_branch }}\`
+          - **Original Files:** Available in \`_backups/original/\`
+          - **Locofy Design:** Available in \`_backups/locofy_design/\`
+
+          ### 📋 Review Checklist
+          - [ ] Verify all existing functionality still works
+          - [ ] Check that new design matches Figma
+          - [ ] Ensure no TypeScript errors
+          - [ ] Test authentication flow
+          - [ ] Test form validation
+          - [ ] Check responsive design
+          - [ ] Verify accessibility (ARIA labels, keyboard navigation)
+          - [ ] Run existing tests
+
+          ### 🔗 References
+          - **Locofy Repository:** ${{ needs.setup.outputs.locofy_repo }}
+          - **Locofy Branch:** ${{ needs.setup.outputs.locofy_branch }}
+          - **Source Workflow:** [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+          ⚠️ **This is an automated PR. Please review carefully before merging.**"
+          
+          PR_URL=$(gh pr create \
+            --base "${{ needs.setup.outputs.target_branch }}" \
+            --head "${{ needs.setup.outputs.integration_branch }}" \
+            --title "🎨 Design Update: ${{ needs.setup.outputs.components }}" \
+            --body "$PR_BODY" \
+            --label "design,automated,needs-review" 2>&1) || true
+          
+          if [[ "$PR_URL" == http* ]]; then
+            echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+            echo "## ✅ Pull Request Created" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔗 $PR_URL" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ PR creation output: $PR_URL"
+            echo "## ⚠️ PR Creation Issue" >> $GITHUB_STEP_SUMMARY
+            echo "$PR_URL" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  notify:
+    name: Send Notifications
+    needs: [setup, integrate]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check Slack Configuration
+        id: check_slack
+        run: |
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "Slack notifications not configured (SLACK_WEBHOOK_URL secret missing)"
+          fi
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          
+      - name: Send Slack Notification
+        if: steps.check_slack.outputs.configured == 'true'
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STATUS="${{ needs.integrate.result }}"
+          if [ "$STATUS" == "success" ]; then
+            COLOR="good"
+            EMOJI="✅"
+            MESSAGE="Design integration completed successfully"
+          else
+            COLOR="danger"
+            EMOJI="❌"
+            MESSAGE="Design integration failed or needs attention"
+          fi
+          
+          curl -X POST $SLACK_WEBHOOK_URL \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"attachments\": [
+                {
+                  \"color\": \"$COLOR\",
+                  \"blocks\": [
+                    {
+                      \"type\": \"header\",
+                      \"text\": {
+                        \"type\": \"plain_text\",
+                        \"text\": \"$EMOJI Design Integration Update\",
+                        \"emoji\": true
+                      }
+                    },
+                    {
+                      \"type\": \"section\",
+                      \"fields\": [
+                        {\"type\": \"mrkdwn\", \"text\": \"*Status:*\n$MESSAGE\"},
+                        {\"type\": \"mrkdwn\", \"text\": \"*Components:*\n${{ needs.setup.outputs.components }}\"},
+                        {\"type\": \"mrkdwn\", \"text\": \"*Branch:*\n${{ needs.setup.outputs.integration_branch }}\"},
+                        {\"type\": \"mrkdwn\", \"text\": \"*Triggered by:*\n${{ github.actor }}\"}
+                      ]
+                    },
+                    {
+                      \"type\": \"actions\",
+                      \"elements\": [
+                        {
+                          \"type\": \"button\",
+                          \"text\": {\"type\": \"plain_text\", \"text\": \"View Workflow\"},
+                          \"url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }"
+            
+      - name: Check Email Configuration
+        id: check_email
+        run: |
+          if [ -n "$SMTP_SERVER" ] && [ -n "$NOTIFICATION_EMAIL" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "Email notifications not configured (SMTP_SERVER or NOTIFICATION_EMAIL secret missing)"
+          fi
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
+          
+      - name: Send Email Notification
+        if: steps.check_email.outputs.configured == 'true'
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "🎨 Design Integration: ${{ needs.setup.outputs.components }} - ${{ needs.integrate.result }}"
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: "GitHub Actions <noreply@github.com>"
+          html_body: |
+            <h2>Design Integration Update</h2>
+            <p><strong>Status:</strong> ${{ needs.integrate.result }}</p>
+            <p><strong>Components:</strong> ${{ needs.setup.outputs.components }}</p>
+            <p><strong>Integration Branch:</strong> ${{ needs.setup.outputs.integration_branch }}</p>
+            <p><strong>Backup Branch:</strong> ${{ needs.setup.outputs.backup_branch }}</p>
+            <hr>
+            <p><a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">View Workflow Run</a></p>
+            <p><a href="${{ github.server_url }}/${{ github.repository }}/pulls">View Pull Requests</a></p>
