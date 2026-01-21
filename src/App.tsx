@@ -18,6 +18,7 @@ function App() {
     }
   }, [action, pathname]);
 
+
   useEffect(() => {
     let title = "";
     let metaDescription = "";
