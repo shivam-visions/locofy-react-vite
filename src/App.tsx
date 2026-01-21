@@ -5,7 +5,7 @@ import {
   useNavigationType,
   useLocation,
 } from "react-router-dom";
-import { Login } from "./pages/Login";
+import Login from "./pages/Login";
 
 function App() {
   const action = useNavigationType();
@@ -17,7 +17,6 @@ function App() {
       window.scrollTo(0, 0);
     }
   }, [action, pathname]);
-
 
   useEffect(() => {
     let title = "";
