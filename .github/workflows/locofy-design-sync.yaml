@@ -34,7 +34,7 @@ on:
 
 env:
   MAIN_REPO: Saleslabdev/frontend
-  MAIN_REPO_BRANCH: test
+  MAIN_REPO_BRANCH: locofy-integration
   
 jobs:
   detect-changes:
