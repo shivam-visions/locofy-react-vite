@@ -62,7 +62,8 @@ jobs:
             HAS_CHANGES="true"
           else
             # Auto-detect from git diff
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- 'src/**/*.tsx' 'src/**/*.ts' 'src/**/*.jsx' 'src/**/*.js' 'src/**/*.css' 2>/dev/null || echo "")
+            # Detect any change under src (any extension) so page-level updates are captured
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- 'src/**' 2>/dev/null || echo "")
             
             if [ -z "$CHANGED_FILES" ]; then
               echo "No component files changed"
