@@ -7,7 +7,7 @@
       "owner": "shivam-visions",
       "name": "locofy-react-vite",
       "branch": "main",
-      "source_path": "locofy/src"
+      "source_path": "src"
     },
     "main_project": {
       "owner": "Saleslabdev",
